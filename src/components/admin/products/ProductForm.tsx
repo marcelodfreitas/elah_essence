@@ -132,56 +132,58 @@ export function ProductForm({
    */
 
   useEffect(() => {
-    if (!product?.id) {
-      setVariants([]);
-      return;
-    }
+  if (!product?.id) {
+    setVariants([])
+    return
+  }
 
-    async function loadVariants() {
-      setLoadingVariants(true);
+  const productId = product.id
 
-      try {
-        const supabase = createClient();
+  async function loadVariants() {
+    setLoadingVariants(true)
 
-        const { data, error } = await supabase
-          .from("product_variants")
-          .select(
-            "id, name, size, sku, price, stock_quantity, is_active",
-          )
-          .eq("product_id", product.id)
-          .order("created_at", { ascending: true });
+    try {
+      const supabase = createClient()
 
-        if (error) {
-          throw new Error(error.message);
-        }
+      const { data, error } = await supabase
+        .from("product_variants")
+        .select(
+          "id, name, size, sku, price, stock_quantity, is_active",
+        )
+        .eq("product_id", productId)
+        .order("created_at", { ascending: true })
 
-        const formattedVariants: VariantForm[] = (data ?? []).map(
-          (variant: ProductVariant) => ({
-            id: variant.id,
-            size: variant.size ?? "",
-            sku: variant.sku ?? "",
-            price: variant.price?.toString() ?? "",
-            stock_quantity: variant.stock_quantity?.toString() ?? "0",
-            is_active: variant.is_active,
-          }),
-        );
-
-        setVariants(formattedVariants);
-      } catch (error) {
-        console.error("Erro ao carregar variantes:", error);
-
-        alert(
-          error instanceof Error
-            ? error.message
-            : "Não foi possível carregar as variantes.",
-        );
-      } finally {
-        setLoadingVariants(false);
+      if (error) {
+        throw new Error(error.message)
       }
-    }
 
-    loadVariants();
-  }, [product?.id]);
+      const formattedVariants: VariantForm[] = (data ?? []).map(
+        (variant: ProductVariant) => ({
+          id: variant.id,
+          size: variant.size ?? "",
+          sku: variant.sku ?? "",
+          price: variant.price?.toString() ?? "",
+          stock_quantity: variant.stock_quantity?.toString() ?? "0",
+          is_active: variant.is_active,
+        }),
+      )
+
+      setVariants(formattedVariants)
+    } catch (error) {
+      console.error("Erro ao carregar variantes:", error)
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível carregar as variantes.",
+      )
+    } finally {
+      setLoadingVariants(false)
+    }
+  }
+
+  loadVariants()
+}, [product?.id])
 
   /*
    * =========================
