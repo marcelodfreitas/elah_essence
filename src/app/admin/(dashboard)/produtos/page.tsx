@@ -35,6 +35,13 @@ type Product = {
 export default async function ProdutosPage() {
   const supabase = await createClient()
 
+  // =========================================================
+  // 1. BUSCA OS PRODUTOS
+  // =========================================================
+  //
+  // Aqui buscamos os IDs diretamente.
+  // Não dependemos dos relacionamentos aninhados do Supabase.
+  //
   const { data: products, error } = await supabase
     .from('products')
     .select(`
@@ -47,14 +54,8 @@ export default async function ProdutosPage() {
       is_active,
       is_featured,
       created_at,
-      materials (
-        name,
-        slug
-      ),
-      categories (
-        name,
-        slug
-      )
+      material_id,
+      category_id
     `)
     .order('created_at', { ascending: false })
 
@@ -62,12 +63,99 @@ export default async function ProdutosPage() {
     console.error('Erro ao buscar produtos:', error)
   }
 
-  /*
-   * O Supabase retorna os relacionamentos como arrays.
-   * Como cada produto possui um único material e uma única categoria,
-   * normalizamos os relacionamentos aqui para objetos únicos.
-   */
-  const normalizedProducts: Product[] = (products ?? []).map((product) => ({
+  const rawProducts = products ?? []
+
+  // =========================================================
+  // 2. PEGA OS IDs ÚNICOS DE MATERIAL E CATEGORIA
+  // =========================================================
+
+  const materialIds = [
+    ...new Set(
+      rawProducts
+        .map((product) => product.material_id)
+        .filter(Boolean)
+    ),
+  ]
+
+  const categoryIds = [
+    ...new Set(
+      rawProducts
+        .map((product) => product.category_id)
+        .filter(Boolean)
+    ),
+  ]
+
+  // =========================================================
+  // 3. BUSCA OS MATERIAIS E CATEGORIAS SEPARADAMENTE
+  // =========================================================
+
+  const [materialsResult, categoriesResult] = await Promise.all([
+    materialIds.length > 0
+      ? supabase
+          .from('materials')
+          .select(`
+            id,
+            name,
+            slug
+          `)
+          .in('id', materialIds)
+      : Promise.resolve({ data: [], error: null }),
+
+    categoryIds.length > 0
+      ? supabase
+          .from('categories')
+          .select(`
+            id,
+            name,
+            slug
+          `)
+          .in('id', categoryIds)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+
+  if (materialsResult.error) {
+    console.error(
+      'Erro ao buscar materiais:',
+      materialsResult.error
+    )
+  }
+
+  if (categoriesResult.error) {
+    console.error(
+      'Erro ao buscar categorias:',
+      categoriesResult.error
+    )
+  }
+
+  // =========================================================
+  // 4. TRANSFORMA EM MAPS
+  // =========================================================
+
+  const materialsMap = new Map(
+    (materialsResult.data ?? []).map((material) => [
+      material.id,
+      {
+        name: material.name,
+        slug: material.slug,
+      },
+    ])
+  )
+
+  const categoriesMap = new Map(
+    (categoriesResult.data ?? []).map((category) => [
+      category.id,
+      {
+        name: category.name,
+        slug: category.slug,
+      },
+    ])
+  )
+
+  // =========================================================
+  // 5. MONTA OS PRODUTOS FINAIS
+  // =========================================================
+
+  const normalizedProducts: Product[] = rawProducts.map((product) => ({
     id: product.id,
     name: product.name,
     slug: product.slug,
@@ -77,8 +165,14 @@ export default async function ProdutosPage() {
     is_active: product.is_active,
     is_featured: product.is_featured,
     created_at: product.created_at,
-    materials: product.materials?.[0] ?? null,
-    categories: product.categories?.[0] ?? null,
+
+    materials: product.material_id
+      ? materialsMap.get(product.material_id) ?? null
+      : null,
+
+    categories: product.category_id
+      ? categoriesMap.get(product.category_id) ?? null
+      : null,
   }))
 
   return (

@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowLeft, Save, Eye, EyeOff } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  Eye,
+  EyeOff,
+  Plus,
+  Save,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/client";
@@ -38,6 +45,25 @@ type ExistingImage = {
   sort_order: number;
 };
 
+type ProductVariant = {
+  id: string;
+  name: string | null;
+  size: string | null;
+  sku: string | null;
+  price: number | null;
+  stock_quantity: number;
+  is_active: boolean;
+};
+
+type VariantForm = {
+  id?: string;
+  size: string;
+  sku: string;
+  price: string;
+  stock_quantity: string;
+  is_active: boolean;
+};
+
 type ProductFormProps = {
   materials: Option[];
   categories: Option[];
@@ -70,10 +96,19 @@ export function ProductForm({
   const [isFeatured, setIsFeatured] = useState(product?.is_featured ?? false);
   const [isActive, setIsActive] = useState(product?.is_active ?? true);
 
+  const [variants, setVariants] = useState<VariantForm[]>([]);
+  const [loadingVariants, setLoadingVariants] = useState(false);
+
   const [images, setImages] = useState<File[]>([]);
   const [mainImage, setMainImage] = useState<File | null>(null);
 
   const [saving, setSaving] = useState(false);
+
+  /*
+   * =========================
+   * CARREGAR PRODUTO
+   * =========================
+   */
 
   useEffect(() => {
     if (!product) return;
@@ -89,6 +124,124 @@ export function ProductForm({
     setIsFeatured(product.is_featured);
     setIsActive(product.is_active);
   }, [product]);
+
+  /*
+   * =========================
+   * CARREGAR VARIANTES
+   * =========================
+   */
+
+  useEffect(() => {
+    if (!product?.id) {
+      setVariants([]);
+      return;
+    }
+
+    async function loadVariants() {
+      setLoadingVariants(true);
+
+      try {
+        const supabase = createClient();
+
+        const { data, error } = await supabase
+          .from("product_variants")
+          .select(
+            "id, name, size, sku, price, stock_quantity, is_active",
+          )
+          .eq("product_id", product.id)
+          .order("created_at", { ascending: true });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        const formattedVariants: VariantForm[] = (data ?? []).map(
+          (variant: ProductVariant) => ({
+            id: variant.id,
+            size: variant.size ?? "",
+            sku: variant.sku ?? "",
+            price: variant.price?.toString() ?? "",
+            stock_quantity: variant.stock_quantity?.toString() ?? "0",
+            is_active: variant.is_active,
+          }),
+        );
+
+        setVariants(formattedVariants);
+      } catch (error) {
+        console.error("Erro ao carregar variantes:", error);
+
+        alert(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível carregar as variantes.",
+        );
+      } finally {
+        setLoadingVariants(false);
+      }
+    }
+
+    loadVariants();
+  }, [product?.id]);
+
+  /*
+   * =========================
+   * ESTOQUE TOTAL DAS VARIANTES
+   * =========================
+   */
+
+  const variantTotalStock = useMemo(() => {
+    return variants.reduce((total, variant) => {
+      return total + (Number(variant.stock_quantity) || 0);
+    }, 0);
+  }, [variants]);
+
+  /*
+   * =========================
+   * VARIANTES
+   * =========================
+   */
+
+  function addVariant() {
+    setVariants((current) => [
+      ...current,
+      {
+        size: "",
+        sku: "",
+        price: "",
+        stock_quantity: "0",
+        is_active: true,
+      },
+    ]);
+  }
+
+  function updateVariant(
+    index: number,
+    field: keyof VariantForm,
+    value: string | boolean,
+  ) {
+    setVariants((current) =>
+      current.map((variant, variantIndex) =>
+        variantIndex === index
+          ? {
+              ...variant,
+              [field]: value,
+            }
+          : variant,
+      ),
+    );
+  }
+
+  function removeVariant(index: number) {
+    setVariants((current) =>
+      current.filter((_, variantIndex) => variantIndex !== index),
+    );
+  }
+
+  /*
+   * =========================
+   * EXCLUIR PRODUTO
+   * =========================
+   */
 
   async function handleDeleteProduct() {
     if (!product) return;
@@ -107,10 +260,11 @@ export function ProductForm({
       const supabase = createClient();
 
       // 1. Buscar imagens do produto
-      const { data: productImages, error: imagesFetchError } = await supabase
-        .from("product_images")
-        .select("id, storage_path")
-        .eq("product_id", product.id);
+      const { data: productImages, error: imagesFetchError } =
+        await supabase
+          .from("product_images")
+          .select("id, storage_path")
+          .eq("product_id", product.id);
 
       if (imagesFetchError) {
         throw new Error(imagesFetchError.message);
@@ -144,7 +298,17 @@ export function ProductForm({
         throw new Error(deleteImagesError.message);
       }
 
-      // 4. Remover o produto
+      // 4. Remover variantes
+      const { error: deleteVariantsError } = await supabase
+        .from("product_variants")
+        .delete()
+        .eq("product_id", product.id);
+
+      if (deleteVariantsError) {
+        throw new Error(deleteVariantsError.message);
+      }
+
+      // 5. Remover o produto
       const { error: deleteProductError } = await supabase
         .from("products")
         .delete()
@@ -169,6 +333,12 @@ export function ProductForm({
       setSaving(false);
     }
   }
+
+  /*
+   * =========================
+   * ATIVAR / DESATIVAR
+   * =========================
+   */
 
   async function handleToggleActive() {
     if (!product) return;
@@ -219,6 +389,150 @@ export function ProductForm({
     }
   }
 
+  /*
+   * =========================
+   * VALIDAR VARIANTES
+   * =========================
+   */
+
+  function validateVariants() {
+    if (!hasVariants) return;
+
+    if (variants.length === 0) {
+      throw new Error(
+        "Adicione pelo menos uma variação ou desative a opção de variações.",
+      );
+    }
+
+    const normalizedSizes = variants.map((variant) =>
+      variant.size.trim().toLowerCase(),
+    );
+
+    const duplicatedSizes = normalizedSizes.filter(
+      (size, index) => size && normalizedSizes.indexOf(size) !== index,
+    );
+
+    if (duplicatedSizes.length > 0) {
+      throw new Error(
+        "Existem tamanhos duplicados. Cada tamanho deve aparecer apenas uma vez.",
+      );
+    }
+
+    variants.forEach((variant, index) => {
+      if (!variant.size.trim()) {
+        throw new Error(`Informe o tamanho da variação ${index + 1}.`);
+      }
+
+      if (Number(variant.stock_quantity) < 0) {
+        throw new Error(
+          `O estoque da variação ${index + 1} não pode ser negativo.`,
+        );
+      }
+
+      if (variant.price && Number(variant.price) < 0) {
+        throw new Error(
+          `O preço da variação ${index + 1} não pode ser negativo.`,
+        );
+      }
+    });
+  }
+
+  /*
+   * =========================
+   * SALVAR VARIANTES
+   * =========================
+   */
+
+  async function saveVariants(productId: string) {
+    const supabase = createClient();
+
+    /*
+     * Busca as variantes atualmente existentes no banco.
+     * Isso permite atualizar as existentes, inserir novas
+     * e excluir apenas as que foram removidas do formulário.
+     */
+    const { data: existingVariants, error: existingError } =
+      await supabase
+        .from("product_variants")
+        .select("id")
+        .eq("product_id", productId);
+
+    if (existingError) {
+      throw new Error(existingError.message);
+    }
+
+    const existingIds = new Set(
+      (existingVariants ?? []).map((variant) => variant.id),
+    );
+
+    const formIds = new Set(
+      variants
+        .map((variant) => variant.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    /*
+     * Remove apenas variantes que existiam no banco
+     * e foram retiradas do formulário.
+     */
+    const idsToDelete = [...existingIds].filter(
+      (id) => !formIds.has(id),
+    );
+
+    if (idsToDelete.length > 0) {
+      const { error: deleteError } = await supabase
+        .from("product_variants")
+        .delete()
+        .in("id", idsToDelete);
+
+      if (deleteError) {
+        throw new Error(deleteError.message);
+      }
+    }
+
+    /*
+     * Atualiza ou cria cada variante.
+     */
+    for (const variant of variants) {
+      const payload = {
+        product_id: productId,
+        name: "Tamanho",
+        size: variant.size.trim(),
+        sku: variant.sku.trim() || null,
+        price: variant.price ? Number(variant.price) : null,
+        stock_quantity: Number(variant.stock_quantity) || 0,
+        is_active: variant.is_active,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (variant.id) {
+        const { error: updateError } = await supabase
+          .from("product_variants")
+          .update(payload)
+          .eq("id", variant.id)
+          .eq("product_id", productId);
+
+        if (updateError) {
+          throw new Error(updateError.message);
+        }
+      } else {
+        const { error: insertError } = await supabase
+          .from("product_variants")
+          .insert(payload);
+
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
+      }
+    }
+  }
+
+  /*
+   * =========================
+   * SALVAR PRODUTO
+   * =========================
+   */
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -241,6 +555,8 @@ export function ProductForm({
         throw new Error("Informe o preço.");
       }
 
+      validateVariants();
+
       const supabase = createClient();
 
       const slug = name
@@ -250,6 +566,14 @@ export function ProductForm({
         .trim()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "");
+
+      /*
+       * Quando existem variantes, o estoque principal
+       * passa a representar a soma dos estoques.
+       */
+      const finalStockQuantity = hasVariants
+        ? variantTotalStock
+        : Number(stockQuantity) || 0;
 
       /*
        * =========================
@@ -270,7 +594,7 @@ export function ProductForm({
             promotional_price: promotionalPrice
               ? Number(promotionalPrice)
               : null,
-            stock_quantity: Number(stockQuantity) || 0,
+            stock_quantity: finalStockQuantity,
             has_variants: hasVariants,
             is_featured: isFeatured,
             is_active: isActive,
@@ -280,6 +604,17 @@ export function ProductForm({
 
         if (updateError) {
           throw new Error(updateError.message);
+        }
+
+        /*
+         * Salva as variantes somente quando o produto
+         * está configurado para utilizá-las.
+         *
+         * Se o usuário desativar temporariamente as variantes,
+         * elas continuam salvas no banco.
+         */
+        if (hasVariants) {
+          await saveVariants(product.id);
         }
 
         /*
@@ -352,8 +687,10 @@ export function ProductForm({
           material_id: materialId,
           description: description.trim() || null,
           price: Number(price),
-          promotional_price: promotionalPrice ? Number(promotionalPrice) : null,
-          stock_quantity: Number(stockQuantity) || 0,
+          promotional_price: promotionalPrice
+            ? Number(promotionalPrice)
+            : null,
+          stock_quantity: finalStockQuantity,
           has_variants: hasVariants,
           is_featured: isFeatured,
           is_active: isActive,
@@ -371,12 +708,24 @@ export function ProductForm({
       }
 
       /*
+       * Salvar variantes do novo produto.
+       */
+
+      if (hasVariants) {
+        await saveVariants(newProduct.id);
+      }
+
+      /*
        * Upload das imagens do novo produto.
        */
 
       if (images.length > 0) {
         const orderedImages = [
-          ...(mainImage ? [mainImage] : images.length > 0 ? [images[0]] : []),
+          ...(mainImage
+            ? [mainImage]
+            : images.length > 0
+              ? [images[0]]
+              : []),
           ...images.filter((file) => file !== mainImage),
         ];
 
@@ -489,7 +838,9 @@ export function ProductForm({
 
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
-              <label className="mb-2 block text-sm font-medium">Material</label>
+              <label className="mb-2 block text-sm font-medium">
+                Material
+              </label>
 
               <select
                 value={materialId}
@@ -530,7 +881,9 @@ export function ProductForm({
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium">Descrição</label>
+            <label className="mb-2 block text-sm font-medium">
+              Descrição
+            </label>
 
             <textarea
               value={description}
@@ -555,7 +908,9 @@ export function ProductForm({
 
         <div className="grid gap-5 sm:grid-cols-3">
           <div>
-            <label className="mb-2 block text-sm font-medium">Preço</label>
+            <label className="mb-2 block text-sm font-medium">
+              Preço
+            </label>
 
             <input
               type="number"
@@ -579,26 +934,245 @@ export function ProductForm({
               step="0.01"
               min="0"
               value={promotionalPrice}
-              onChange={(event) => setPromotionalPrice(event.target.value)}
+              onChange={(event) =>
+                setPromotionalPrice(event.target.value)
+              }
               placeholder="Opcional"
               className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-[#b99b61] focus:ring-2 focus:ring-[#b99b61]/10"
             />
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium">Estoque</label>
+            <label className="mb-2 block text-sm font-medium">
+              Estoque
+            </label>
 
             <input
               type="number"
               min="0"
-              value={stockQuantity}
+              value={hasVariants ? variantTotalStock : stockQuantity}
               onChange={(event) => setStockQuantity(event.target.value)}
+              disabled={hasVariants}
               required
-              className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-[#b99b61] focus:ring-2 focus:ring-[#b99b61]/10"
+              className={`w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none transition focus:border-[#b99b61] focus:ring-2 focus:ring-[#b99b61]/10 ${
+                hasVariants
+                  ? "cursor-not-allowed bg-[#f3f1ed] text-black/55"
+                  : "bg-white"
+              }`}
             />
+
+            {hasVariants && (
+              <p className="mt-2 text-xs text-black/40">
+                O estoque total é calculado automaticamente pela soma das
+                variações.
+              </p>
+            )}
           </div>
         </div>
       </section>
+
+      {/* Variações */}
+      {hasVariants && (
+        <section className="rounded-3xl border border-black/[0.06] bg-[#fdfcf9] p-5 shadow-[0_10px_40px_rgba(0,0,0,0.03)] sm:p-8">
+          <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-[#a88950]">
+                Disponibilidade
+              </p>
+
+              <h2 className="mt-2 font-serif text-2xl">
+                Variações do produto
+              </h2>
+
+              <p className="mt-1 max-w-xl text-sm text-black/45">
+                Cadastre os tamanhos disponíveis e controle o estoque de cada
+                um separadamente.
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-[#f3efe7] px-4 py-3">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-black/40">
+                Estoque total
+              </p>
+
+              <p className="mt-1 text-lg font-semibold text-[#1c1b19]">
+                {variantTotalStock}{" "}
+                <span className="text-sm font-normal text-black/45">
+                  unidades
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {loadingVariants ? (
+            <div className="rounded-2xl border border-dashed border-black/10 bg-[#faf9f6] px-5 py-10 text-center">
+              <p className="text-sm text-black/45">
+                Carregando variações...
+              </p>
+            </div>
+          ) : variants.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-black/10 bg-[#faf9f6] px-5 py-10 text-center">
+              <p className="text-sm font-medium">
+                Nenhuma variação cadastrada
+              </p>
+
+              <p className="mt-1 text-xs text-black/40">
+                Adicione os tamanhos disponíveis para esta peça.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {variants.map((variant, index) => (
+                <div
+                  key={variant.id ?? `new-${index}`}
+                  className="rounded-2xl border border-black/[0.07] bg-white p-4 sm:p-5"
+                >
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.14em] text-[#a88950]">
+                        Variação {index + 1}
+                      </p>
+
+                      <p className="mt-1 text-sm font-medium">
+                        {variant.size.trim() || "Novo tamanho"}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => removeVariant(index)}
+                      disabled={saving}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-100 bg-red-50 text-red-500 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Remover variação"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-black/65">
+                        Tamanho
+                      </label>
+
+                      <input
+                        type="text"
+                        value={variant.size}
+                        onChange={(event) =>
+                          updateVariant(
+                            index,
+                            "size",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Ex.: 16"
+                        className="w-full rounded-xl border border-black/10 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-[#b99b61] focus:ring-2 focus:ring-[#b99b61]/10"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-black/65">
+                        Estoque
+                      </label>
+
+                      <input
+                        type="number"
+                        min="0"
+                        value={variant.stock_quantity}
+                        onChange={(event) =>
+                          updateVariant(
+                            index,
+                            "stock_quantity",
+                            event.target.value,
+                          )
+                        }
+                        className="w-full rounded-xl border border-black/10 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-[#b99b61] focus:ring-2 focus:ring-[#b99b61]/10"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-black/65">
+                        SKU
+                      </label>
+
+                      <input
+                        type="text"
+                        value={variant.sku}
+                        onChange={(event) =>
+                          updateVariant(
+                            index,
+                            "sku",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Opcional"
+                        className="w-full rounded-xl border border-black/10 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-[#b99b61] focus:ring-2 focus:ring-[#b99b61]/10"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-xs font-medium text-black/65">
+                        Preço específico
+                      </label>
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={variant.price}
+                        onChange={(event) =>
+                          updateVariant(
+                            index,
+                            "price",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Preço principal"
+                        className="w-full rounded-xl border border-black/10 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-[#b99b61] focus:ring-2 focus:ring-[#b99b61]/10"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-black/[0.06] pt-4">
+                    <div>
+                      <p className="text-xs font-medium">
+                        Variação disponível
+                      </p>
+
+                      <p className="mt-0.5 text-[11px] text-black/40">
+                        Desative sem precisar excluir o tamanho.
+                      </p>
+                    </div>
+
+                    <input
+                      type="checkbox"
+                      checked={variant.is_active}
+                      onChange={(event) =>
+                        updateVariant(
+                          index,
+                          "is_active",
+                          event.target.checked,
+                        )
+                      }
+                      className="h-5 w-5 accent-[#a88950]"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={addVariant}
+            disabled={saving}
+            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[#a88950]/30 bg-[#fbf8f1] px-5 py-3 text-sm font-medium text-[#7d6335] transition hover:border-[#a88950]/50 hover:bg-[#f7f1e5] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+          >
+            <Plus className="h-4 w-4" />
+            Adicionar tamanho
+          </button>
+        </section>
+      )}
 
       {/* Configurações */}
       <section className="rounded-3xl border border-black/[0.06] bg-[#fdfcf9] p-5 shadow-[0_10px_40px_rgba(0,0,0,0.03)] sm:p-8">
@@ -703,7 +1277,7 @@ export function ProductForm({
 
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || loadingVariants}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#1c1b19] px-6 py-3 text-sm font-medium text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Save className="h-4 w-4" />

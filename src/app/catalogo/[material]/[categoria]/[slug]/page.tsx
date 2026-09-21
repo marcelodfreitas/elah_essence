@@ -1,9 +1,10 @@
 import Link from 'next/link'
-import { ArrowLeft, ArrowRight, Check, MessageCircle } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { notFound } from 'next/navigation'
 
 import { createClient } from '@/lib/supabase/server'
 import ProductGallery from './ProductGallery'
+import ProductPurchasePanel from './ProductPurchasePanel'
 
 type PageProps = {
   params: Promise<{
@@ -31,6 +32,16 @@ type ProductImage = {
   sort_order: number
 }
 
+type ProductVariant = {
+  id: string
+  name: string | null
+  size: string | null
+  sku: string | null
+  price: number | null
+  stock_quantity: number
+  is_active: boolean
+}
+
 type Product = {
   id: string
   name: string
@@ -39,17 +50,12 @@ type Product = {
   price: number
   promotional_price: number | null
   stock_quantity: number | null
+  has_variants: boolean
   material_id: string
   category_id: string
   is_active: boolean
   product_images: ProductImage[]
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-  }).format(value)
+  product_variants: ProductVariant[]
 }
 
 export default async function ProdutoPage({
@@ -63,7 +69,12 @@ export default async function ProdutoPage({
 
   const supabase = await createClient()
 
-  // Buscar material
+  /*
+   * =========================
+   * MATERIAL
+   * =========================
+   */
+
   const { data: material, error: materialError } = await supabase
     .from('materials')
     .select('id, name, slug')
@@ -74,7 +85,12 @@ export default async function ProdutoPage({
     notFound()
   }
 
-  // Buscar categoria
+  /*
+   * =========================
+   * CATEGORIA
+   * =========================
+   */
+
   const { data: category, error: categoryError } = await supabase
     .from('categories')
     .select('id, name, slug')
@@ -85,7 +101,12 @@ export default async function ProdutoPage({
     notFound()
   }
 
-  // Buscar produto
+  /*
+   * =========================
+   * PRODUTO
+   * =========================
+   */
+
   const { data: product, error: productError } = await supabase
     .from('products')
     .select(`
@@ -96,6 +117,7 @@ export default async function ProdutoPage({
       price,
       promotional_price,
       stock_quantity,
+      has_variants,
       material_id,
       category_id,
       is_active,
@@ -103,6 +125,15 @@ export default async function ProdutoPage({
         id,
         image_url,
         sort_order
+      ),
+      product_variants (
+        id,
+        name,
+        size,
+        sku,
+        price,
+        stock_quantity,
+        is_active
       )
     `)
     .eq('slug', productSlug)
@@ -115,43 +146,65 @@ export default async function ProdutoPage({
     notFound()
   }
 
+  /*
+   * =========================
+   * IMAGENS
+   * =========================
+   */
+
   const images = [...(product.product_images ?? [])].sort(
     (a, b) => a.sort_order - b.sort_order
   )
 
-  const hasPromotion = product.promotional_price !== null
+  /*
+   * =========================
+   * VARIANTES
+   * =========================
+   */
 
-  const finalPrice =
-    product.promotional_price ?? product.price
+  const variants = [...(product.product_variants ?? [])]
+    .filter((variant) => variant.is_active)
+    .sort((a, b) => {
+      const sizeA = Number(a.size)
+      const sizeB = Number(b.size)
 
-  const isAvailable =
-    product.stock_quantity === null ||
-    product.stock_quantity > 0
+      if (!Number.isNaN(sizeA) && !Number.isNaN(sizeB)) {
+        return sizeA - sizeB
+      }
+
+      return (a.size ?? '').localeCompare(
+        b.size ?? '',
+        'pt-BR',
+        { numeric: true }
+      )
+    })
 
   /*
-   * IMPORTANTE:
-   * Troque pelo número do WhatsApp da ELAH.
-   *
-   * Formato:
-   * 5551999999999
-   *
-   * Não coloque +, espaços, parênteses ou hífens.
+   * =========================
+   * ESTOQUE
+   * =========================
    */
+
+  const variantStock = variants.reduce(
+    (total, variant) => total + (variant.stock_quantity || 0),
+    0
+  )
+
+  const isAvailable = product.has_variants
+    ? variants.some((variant) => variant.stock_quantity > 0)
+    : product.stock_quantity === null ||
+      product.stock_quantity > 0
+
+  /*
+   * =========================
+   * WHATSAPP
+   * =========================
+   *
+   * Mantemos o número atual por enquanto.
+   * Depois podemos puxar isso de store_settings.
+   */
+
   const whatsappNumber = '5551994301670'
-
-  const whatsappMessage = [
-    `Olá! Gostaria de separar a peça *${product.name}*.`,
-    '',
-    `Material: ${material.name}`,
-    `Categoria: ${category.name}`,
-    `Valor: ${formatCurrency(finalPrice)}`,
-    '',
-    'Gostaria de saber mais informações sobre disponibilidade.',
-  ].join('\n')
-
-  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
-    whatsappMessage
-  )}`
 
   return (
     <main className="min-h-screen bg-[#f8f6f2] text-[#1c1b19]">
@@ -238,31 +291,6 @@ export default async function ProdutoPage({
               </p>
             </div>
 
-            {/* PREÇO */}
-            <div className="mt-7">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-black/35">
-                Valor
-              </p>
-
-              <div className="mt-2 flex items-center gap-3">
-                <span className="text-2xl text-black/75">
-                  {formatCurrency(finalPrice)}
-                </span>
-
-                {hasPromotion && (
-                  <span className="text-sm text-black/30 line-through">
-                    {formatCurrency(product.price)}
-                  </span>
-                )}
-              </div>
-
-              {hasPromotion && (
-                <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-[#a88950]">
-                  Condição especial
-                </p>
-              )}
-            </div>
-
             {/* DESCRIÇÃO */}
             {product.description && (
               <div className="mt-8">
@@ -276,55 +304,20 @@ export default async function ProdutoPage({
               </div>
             )}
 
-            {/* DISPONIBILIDADE */}
-            <div className="mt-8 flex items-center gap-2">
-              {isAvailable ? (
-                <>
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#e8eee5]">
-                    <Check className="h-3.5 w-3.5 text-[#60705a]" />
-                  </span>
-
-                  <span className="text-xs text-black/55">
-                    Peça disponível
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-black/30" />
-
-                  <span className="text-xs text-black/45">
-                    Peça indisponível
-                  </span>
-                </>
-              )}
-            </div>
-
-            {/* WHATSAPP */}
-            {isAvailable && (
-              <div className="mt-10">
-                <a
-                  href={whatsappUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group flex w-full items-center justify-between rounded-full bg-[#1c1b19] px-6 py-5 text-white transition hover:bg-[#a88950]"
-                >
-                  <span className="flex items-center gap-3">
-                    <MessageCircle className="h-5 w-5" />
-
-                    <span className="text-xs uppercase tracking-[0.16em]">
-                      Separar peça pelo WhatsApp
-                    </span>
-                  </span>
-
-                  <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                </a>
-
-                <p className="mt-3 text-center text-[10px] leading-5 text-black/35">
-                  Você será direcionada para o WhatsApp para confirmar
-                  disponibilidade e atendimento.
-                </p>
-              </div>
-            )}
+            {/* COMPRA / VARIAÇÕES */}
+            <ProductPurchasePanel
+              productName={product.name}
+              materialName={material.name}
+              categoryName={category.name}
+              basePrice={product.price}
+              promotionalPrice={product.promotional_price}
+              stockQuantity={product.stock_quantity}
+              hasVariants={product.has_variants}
+              variants={variants}
+              variantStock={variantStock}
+              isAvailable={isAvailable}
+              whatsappNumber={whatsappNumber}
+            />
 
             {/* VOLTAR */}
             <Link

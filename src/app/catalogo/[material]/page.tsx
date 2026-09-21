@@ -1,88 +1,95 @@
-import Link from 'next/link'
-import { ArrowLeft, ArrowRight } from 'lucide-react'
-import { notFound } from 'next/navigation'
+import Link from "next/link";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+import { notFound } from "next/navigation";
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from "@/lib/supabase/server";
 
 type PageProps = {
   params: Promise<{
-    material: string
-  }>
-}
+    material: string;
+  }>;
+};
 
 type Material = {
-  id: string
-  name: string
-  slug: string
-  description: string | null
-}
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+};
 
 type Category = {
-  id: string
-  name: string
-  slug: string
-}
+  id: string;
+  name: string;
+  slug: string;
+};
 
 type ProductImage = {
-  image_url: string
-  sort_order: number
-}
+  image_url: string;
+  sort_order: number;
+};
 
 type Product = {
-  id: string
-  name: string
-  slug: string
-  price: number
-  promotional_price: number | null
-  is_featured: boolean
-  category: Category | null
-  product_images: ProductImage[]
-}
+  id: string;
+  name: string;
+  slug: string;
+  price: number;
+  promotional_price: number | null;
+  is_featured: boolean;
+  category_id: string;
+  category: Category | null;
+  product_images: ProductImage[];
+};
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-  }).format(value)
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value);
 }
 
 export default async function MaterialPage({ params }: PageProps) {
-  const { material: materialSlug } = await params
+  const { material: materialSlug } = await params;
 
-  const supabase = await createClient()
+  const supabase = await createClient();
+
+  // =========================================================
+  // MATERIAL
+  // =========================================================
 
   const { data: material, error: materialError } = await supabase
-    .from('materials')
-    .select('id, name, slug, description')
-    .eq('slug', materialSlug)
-    .single()
+    .from("materials")
+    .select("id, name, slug, description")
+    .eq("slug", materialSlug)
+    .single();
 
   if (materialError || !material) {
-    notFound()
+    notFound();
   }
 
+  // =========================================================
+  // PRODUTOS
+  // =========================================================
+
   const { data: products, error: productsError } = await supabase
-    .from('products')
-    .select(`
+    .from("products")
+    .select(
+      `
       id,
       name,
       slug,
       price,
       promotional_price,
       is_featured,
-      categories (
-        id,
-        name,
-        slug
-      ),
+      category_id,
       product_images (
         image_url,
         sort_order
       )
-    `)
-    .eq('material_id', material.id)
-    .eq('is_active', true)
-    .order('created_at', { ascending: false })
+    `,
+    )
+    .eq("material_id", material.id)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false });
 
   if (productsError) {
     return (
@@ -93,15 +100,69 @@ export default async function MaterialPage({ params }: PageProps) {
           </p>
         </div>
       </main>
-    )
+    );
   }
 
-  /*
-   * O Supabase retorna os relacionamentos como arrays.
-   * Como cada produto pertence a uma única categoria,
-   * normalizamos aqui para trabalhar com um objeto único
-   * no restante da página.
-   */
+  // =========================================================
+  // CATEGORIAS
+  // =========================================================
+  //
+  // Buscamos as categorias separadamente usando os category_id
+  // dos produtos. Isso evita depender do relacionamento
+  // automático do Supabase entre products e categories.
+  //
+
+  const categoryIds = Array.from(
+    new Set(
+      (products ?? [])
+        .map((product) => product.category_id)
+        .filter(Boolean),
+    ),
+  );
+
+  const { data: categoriesData, error: categoriesError } = categoryIds
+    .length
+    ? await supabase
+        .from("categories")
+        .select("id, name, slug")
+        .in("id", categoryIds)
+    : { data: [], error: null };
+
+  if (categoriesError) {
+    return (
+      <main className="min-h-screen bg-[#f8f6f2] px-5 py-16">
+        <div className="mx-auto max-w-7xl">
+          <p className="text-sm text-black/50">
+            Não foi possível carregar as categorias desta coleção.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  // Cria um mapa:
+  //
+  // category_id -> categoria
+  //
+  // Exemplo:
+  //
+  // cb029c4a... -> {
+  //   id: "...",
+  //   name: "Anéis",
+  //   slug: "aneis"
+  // }
+
+  const categoriesMap = new Map(
+    (categoriesData ?? []).map((category) => [
+      category.id,
+      category,
+    ]),
+  );
+
+  // =========================================================
+  // NORMALIZA PRODUTOS
+  // =========================================================
+
   const normalizedProducts: Product[] = (products ?? []).map((product) => ({
     id: product.id,
     name: product.name,
@@ -109,9 +170,14 @@ export default async function MaterialPage({ params }: PageProps) {
     price: product.price,
     promotional_price: product.promotional_price,
     is_featured: product.is_featured,
-    category: product.categories?.[0] ?? null,
+    category_id: product.category_id,
+    category: categoriesMap.get(product.category_id) ?? null,
     product_images: product.product_images ?? [],
-  }))
+  }));
+
+  // =========================================================
+  // CATEGORIAS DA COLEÇÃO
+  // =========================================================
 
   const categories = Array.from(
     new Map(
@@ -120,9 +186,9 @@ export default async function MaterialPage({ params }: PageProps) {
         .map((product) => [
           product.category!.id,
           product.category!,
-        ])
-    ).values()
-  )
+        ]),
+    ).values(),
+  );
 
   return (
     <main className="min-h-screen bg-[#f8f6f2] text-[#1c1b19]">
@@ -198,27 +264,36 @@ export default async function MaterialPage({ params }: PageProps) {
             <>
               <div className="mb-8 flex items-center justify-between">
                 <p className="text-xs text-black/40">
-                  {normalizedProducts.length}{' '}
-                  {normalizedProducts.length === 1 ? 'peça' : 'peças'}
+                  {normalizedProducts.length}{" "}
+                  {normalizedProducts.length === 1 ? "peça" : "peças"}
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-x-4 gap-y-10 sm:grid-cols-3 lg:grid-cols-4 lg:gap-x-6">
                 {normalizedProducts.map((product) => {
+                  /*
+                   * Caso extremamente defensivo:
+                   * se por algum motivo uma categoria não existir,
+                   * não criamos uma URL falsa.
+                   */
+                  if (!product.category) {
+                    return null;
+                  }
+
                   const image = [...product.product_images].sort(
-                    (a, b) => a.sort_order - b.sort_order
-                  )[0]
+                    (a, b) => a.sort_order - b.sort_order,
+                  )[0];
 
                   const hasPromotion =
-                    product.promotional_price !== null
+                    product.promotional_price !== null;
 
                   const finalPrice =
-                    product.promotional_price ?? product.price
+                    product.promotional_price ?? product.price;
 
                   return (
                     <Link
                       key={product.id}
-                      href={`/catalogo/${material.slug}/${product.category?.slug ?? 'outros'}/${product.slug}`}
+                      href={`/catalogo/${material.slug}/${product.category.slug}/${product.slug}`}
                       className="group"
                     >
                       <div className="relative aspect-[4/5] overflow-hidden rounded-2xl bg-[#eeeae3]">
@@ -243,7 +318,7 @@ export default async function MaterialPage({ params }: PageProps) {
 
                       <div className="mt-4">
                         <p className="text-[10px] uppercase tracking-[0.18em] text-black/35">
-                          {product.category?.name ?? 'ELAH'}
+                          {product.category.name}
                         </p>
 
                         <h2 className="mt-1 font-serif text-lg">
@@ -263,7 +338,7 @@ export default async function MaterialPage({ params }: PageProps) {
                         </div>
                       </div>
                     </Link>
-                  )
+                  );
                 })}
               </div>
             </>
@@ -289,5 +364,5 @@ export default async function MaterialPage({ params }: PageProps) {
         </div>
       </section>
     </main>
-  )
+  );
 }
