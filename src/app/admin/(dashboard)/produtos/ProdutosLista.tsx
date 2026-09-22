@@ -8,7 +8,8 @@ import {
   ChevronRight,
   X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 type Product = {
   id: string
@@ -30,33 +31,136 @@ type Product = {
   } | null
 }
 
+type ProductVariant = {
+  product_id: string
+  sku: string | null
+  size: string | null
+}
+
 export default function ProdutosLista({
   products,
 }: {
   products: Product[]
 }) {
   const [search, setSearch] = useState('')
+  const [productSkus, setProductSkus] = useState<Record<string, string[]>>({})
+
+  /*
+   * Carrega os SKUs das variantes dos produtos.
+   *
+   * O SKU fica em product_variants, e não diretamente em products.
+   * Como a página já possui todos os produtos, fazemos uma única
+   * consulta buscando as variantes desses produtos.
+   */
+  useEffect(() => {
+    const productIds = products.map((product) => product.id)
+
+    if (productIds.length === 0) {
+      setProductSkus({})
+      return
+    }
+
+    async function loadProductSkus() {
+      try {
+        const supabase = createClient()
+
+        const { data, error } = await supabase
+          .from('product_variants')
+          .select('product_id, sku, size')
+          .in('product_id', productIds)
+
+        if (error) {
+          console.error('Erro ao carregar SKUs:', error)
+          return
+        }
+
+        const skuMap: Record<string, string[]> = {}
+
+        for (const variant of (data ?? []) as ProductVariant[]) {
+          if (!variant.sku) continue
+
+          if (!skuMap[variant.product_id]) {
+            skuMap[variant.product_id] = []
+          }
+
+          skuMap[variant.product_id].push(variant.sku)
+        }
+
+        setProductSkus(skuMap)
+      } catch (error) {
+        console.error('Erro ao carregar SKUs:', error)
+      }
+    }
+
+    loadProductSkus()
+  }, [products])
+
+  /*
+   * Normaliza a busca.
+   *
+   * Isso permite procurar, por exemplo:
+   *
+   * 04.01.9227.45
+   * 0401922745
+   * 9227
+   *
+   * e todos podem encontrar o mesmo SKU.
+   */
+  const normalizeSearch = (value: string) => {
+    return value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/[^a-z0-9]/g, '')
+  }
 
   const filteredProducts = useMemo(() => {
-    const term = search.trim().toLowerCase()
+    const rawTerm = search.trim().toLowerCase()
+    const normalizedTerm = normalizeSearch(search)
 
-    if (!term) {
+    if (!rawTerm) {
       return products
     }
 
     return products.filter((product) => {
-      return (
-        product.name.toLowerCase().includes(term) ||
-        product.slug.toLowerCase().includes(term) ||
+      const productSkusForSearch = productSkus[product.id] ?? []
+
+      /*
+       * Busca tradicional:
+       * - Nome
+       * - Slug
+       * - Material
+       * - Categoria
+       */
+      const matchesText =
+        product.name.toLowerCase().includes(rawTerm) ||
+        product.slug.toLowerCase().includes(rawTerm) ||
         product.materials?.name
           ?.toLowerCase()
-          .includes(term) ||
+          .includes(rawTerm) ||
         product.categories?.name
           ?.toLowerCase()
-          .includes(term)
-      )
+          .includes(rawTerm)
+
+      /*
+       * Busca por SKU.
+       *
+       * Comparamos tanto o SKU original quanto sua versão
+       * normalizada para permitir buscas com ou sem pontuação.
+       */
+      const matchesSku = productSkusForSearch.some((sku) => {
+        const skuLower = sku.toLowerCase()
+        const normalizedSku = normalizeSearch(sku)
+
+        return (
+          skuLower.includes(rawTerm) ||
+          normalizedSku.includes(normalizedTerm)
+        )
+      })
+
+      return matchesText || matchesSku
     })
-  }, [products, search])
+  }, [products, productSkus, search])
 
   const hasSearch = search.trim().length > 0
 
@@ -70,10 +174,8 @@ export default function ProdutosLista({
           <input
             type="search"
             value={search}
-            onChange={(event) =>
-              setSearch(event.target.value)
-            }
-            placeholder="Buscar produto..."
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar por nome ou SKU..."
             className="h-11 w-full rounded-xl border border-black/[0.07] bg-[#fdfcf9] pl-11 pr-10 text-sm outline-none transition placeholder:text-black/30 focus:border-[#b99a60] focus:ring-2 focus:ring-[#b99a60]/10"
           />
 
@@ -140,7 +242,13 @@ export default function ProdutosLista({
                   {product.name}
                 </p>
 
-                <div className="mt-1 flex items-center gap-2">
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {productSkus[product.id]?.length > 0 && (
+                    <span className="font-mono text-[9px] tracking-wide text-black/35">
+                      SKU {productSkus[product.id][0]}
+                    </span>
+                  )}
+
                   {product.is_featured && (
                     <span className="text-[9px] uppercase tracking-wider text-[#a88950]">
                       Destaque
@@ -212,6 +320,12 @@ export default function ProdutosLista({
                     {product.categories?.name ??
                       'Sem categoria'}
                   </p>
+
+                  {productSkus[product.id]?.length > 0 && (
+                    <p className="mt-2 font-mono text-[10px] tracking-wide text-black/35">
+                      SKU {productSkus[product.id][0]}
+                    </p>
+                  )}
                 </div>
 
                 <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-black/25" />
