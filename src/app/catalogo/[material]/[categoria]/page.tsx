@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { notFound } from 'next/navigation'
+import WhatsAppShareButton from '@/components/catalogo/WhatsAppShareButton'
 
 import { createClient } from '@/lib/supabase/server'
 
@@ -203,6 +204,14 @@ export default async function CategoriaPage({
             Explore nossa seleção de {category.name.toLowerCase()} em{' '}
             {material.name.toLowerCase()}.
           </p>
+        </div>
+
+        <div className="mt-8">
+          <WhatsAppShareButton
+            label="Compartilhar seleção"
+            message={`Oi! Separei uma seleção de ${category.name.toLowerCase()} em ${material.name.toLowerCase()} da ELAH para você conferir:`}
+            className="mt-7 inline-flex items-center justify-center gap-2 rounded-full border border-[#a88950]/40 px-5 py-3 text-[10px] uppercase tracking-[0.16em] text-[#8d713f] transition hover:border-[#a88950] hover:bg-[#a88950]/[0.06]"
+          />
         </div>
       </section>
 

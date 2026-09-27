@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/server'
 import ProductGallery from './ProductGallery'
 import ProductPurchasePanel from './ProductPurchasePanel'
 
+import WhatsAppShareButton from '@/components/catalogo/WhatsAppShareButton'
+
 type PageProps = {
   params: Promise<{
     material: string
@@ -320,6 +322,13 @@ export default async function ProdutoPage({
             />
 
             {/* VOLTAR */}
+
+            <WhatsAppShareButton
+              label="Compartilhar esta peça"
+              message={`Oi! 💛 Olha esta peça da ELAH: ${product.name}.`}
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[#a88950]/40 px-5 py-3.5 text-[10px] uppercase tracking-[0.16em] text-[#8d713f] transition hover:border-[#a88950] hover:bg-[#a88950]/[0.06] sm:w-auto"
+            />
+
             <Link
               href={`/catalogo/${material.slug}/${category.slug}`}
               className="mt-8 inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-black/40 transition hover:text-black"
